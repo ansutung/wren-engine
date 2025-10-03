@@ -46,19 +46,43 @@ class Rewriter:
         else:
             self._rewriter = ExternalEngineRewriter(java_engine_connector)
 
-    @tracer.start_as_current_span("transpile", kind=trace.SpanKind.INTERNAL)
-    def _transpile(self, planned_sql: str) -> str:
+@tracer.start_as_current_span("transpile", kind=trace.SpanKind.INTERNAL)
+def _transpile(self, planned_sql: str) -> str:
+    try:
+        read = self._get_read_dialect(self.experiment)
+        write = self._get_write_dialect(self.data_source)
+        result = sqlglot.transpile(planned_sql, read=read, write=write)[0]
+        
+        # FIX: Add N prefix for MSSQL Unicode literals
+        if self.data_source == DataSource.mssql:
+            result = self._add_unicode_prefix_to_sql(result)
+        
+        return result
+    except Exception as e:
+        raise WrenError(
+            ErrorCode.SQLGLOT_ERROR,
+            str(e),
+            phase=ErrorPhase.SQL_TRANSPILE,
+            metadata={PLANNED_SQL: planned_sql},
+        )
+
+def _add_unicode_prefix_to_sql(self, sql: str) -> str:
+    """Add N prefix to Unicode string literals for MSSQL"""
+    import re
+    
+    pattern = r"(?<!N)'([^']*)'"
+    
+    def replace_with_n_if_unicode(match):
+        content = match.group(1)
+        if not content:
+            return match.group(0)
         try:
-            read = self._get_read_dialect(self.experiment)
-            write = self._get_write_dialect(self.data_source)
-            return sqlglot.transpile(planned_sql, read=read, write=write)[0]
-        except Exception as e:
-            raise WrenError(
-                ErrorCode.SQLGLOT_ERROR,
-                str(e),
-                phase=ErrorPhase.SQL_TRANSPILE,
-                metadata={PLANNED_SQL: planned_sql},
-            )
+            content.encode('ascii')
+            return match.group(0)  # ASCII only
+        except UnicodeEncodeError:
+            return f"N'{content}'"  # Has Unicode
+    
+    return re.sub(pattern, replace_with_n_if_unicode, sql)
 
     @tracer.start_as_current_span("rewrite", kind=trace.SpanKind.INTERNAL)
     async def rewrite(self, sql: str) -> str:
