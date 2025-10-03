@@ -315,6 +315,9 @@ class MSSqlConnector(SimpleConnector):
 
     @tracer.start_as_current_span("connector_query", kind=trace.SpanKind.CLIENT)
     def query(self, sql: str, limit: int | None = None) -> pa.Table:
+        # FIX: Add N prefix to Unicode literals
+        fixed_sql = self._add_unicode_prefix(sql)
+        
         ibis_table = self.connection.sql(sql)
         if limit is not None:
             ibis_table = ibis_table.limit(limit)
@@ -345,8 +348,11 @@ class MSSqlConnector(SimpleConnector):
         return arrow_table
 
     def dry_run(self, sql: str) -> None:
+        # FIX: Add N prefix before dry run
+        fixed_sql = self._add_unicode_prefix(sql)
+        
         try:
-            super().dry_run(sql)
+            super().dry_run(fixed_sql)
         except AttributeError as e:
             # Workaround for ibis issue #10331
             if e.args[0] == "'NoneType' object has no attribute 'lower'":
