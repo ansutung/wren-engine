@@ -294,6 +294,24 @@ class PostgresConnector(SimpleConnector):
 class MSSqlConnector(SimpleConnector):
     def __init__(self, connection_info: ConnectionInfo):
         super().__init__(DataSource.mssql, connection_info)
+        
+    def _add_unicode_prefix(self, sql: str) -> str:
+        """Add N prefix to Unicode string literals for MSSQL"""
+        import re
+        
+        pattern = r"(?<!N)'([^']*)'"
+        
+        def replace_with_n_if_unicode(match):
+            content = match.group(1)
+            if not content:
+                return match.group(0)
+            try:
+                content.encode('ascii')
+                return match.group(0)  # ASCII only
+            except UnicodeEncodeError:
+                return f"N'{content}'"  # Has Unicode
+        
+        return re.sub(pattern, replace_with_n_if_unicode, sql)
 
     @tracer.start_as_current_span("connector_query", kind=trace.SpanKind.CLIENT)
     def query(self, sql: str, limit: int | None = None) -> pa.Table:
